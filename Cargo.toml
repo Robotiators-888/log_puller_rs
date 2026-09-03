@@ -6,3 +6,9 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.104"
 libssh-rs = { version = "0.3.8", features = ["vendored", "vendored-openssl"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
