@@ -11,7 +11,7 @@ fn main() -> anyhow::Result<()> {
     session.connect()?;
     session.userauth_password(Some("demo"), Some("password"))?;
     let sftp = session.sftp()?;
-    for (i, f) in sftp.read_dir(".")?.into_iter().enumerate() {
+    for f in sftp.read_dir(".")?.into_iter() {
         if let libssh_rs::FileType::Directory = f
             .file_type()
             .ok_or(anyhow::anyhow!("Failed to get file type"))?
