@@ -1,7 +1,15 @@
 use libssh_rs::{Session, Sftp};
-use std::path::Path;
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+};
 
 fn main() -> anyhow::Result<()> {
+    // Is Box<Path> better?
+    let mut map: Arc<Mutex<HashMap<PathBuf, u64>>> = Arc::new(Mutex::new(HashMap::new()));
+    // Is Box<Path> better again?
+    let mut filenames: Vec<(PathBuf, PathBuf)> = Vec::new();
     let session = Session::new()?;
     // session.set_option(libssh_rs::SshOption::Hostname(String::from("localhost")))?;
     session.set_option(libssh_rs::SshOption::Hostname(String::from(
