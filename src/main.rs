@@ -1,18 +1,19 @@
 use libssh_rs::{Session, Sftp};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::Mutex,
 };
 
 fn main() -> anyhow::Result<()> {
-    // Is Box<Path> better?
+    // Is Box<[Path]> better?
     let mut map: HashMap<PathBuf, u64> = HashMap::new();
     // Use notifications to deal with this later
     populate_map(Path::new("data"), &mut map);
     println!("{:?}", map);
-    // let mut map: Arc<Mutex<HashMap<PathBuf, u64>>> = Arc::new(Mutex::new(map));
-    // // Is Box<Path> better again?
+    let map: Mutex<HashMap<PathBuf, u64>> = Mutex::new(map);
+    // // Is Box<[]> better again?
     let mut filesinfos: Vec<(PathBuf, PathBuf, u64)> = Vec::new();
     let session = Session::new()?;
     // session.set_option(libssh_rs::SshOption::Hostname(String::from("localhost")))?;
@@ -22,12 +23,14 @@ fn main() -> anyhow::Result<()> {
     session.connect()?;
     session.userauth_password(Some("demo"), Some("password"))?;
     let sftp = session.sftp()?;
-    get_folder_info(&sftp, Path::new("."), Path::new("data"), &mut filesinfos, &mut map)?;
-    filesinfos.into_iter().for_each(move |i| copy_file(&sftp, i, &mut map).unwrap());
+    get_folder_info(&sftp, Path::new("."), Path::new("data"), &mut filesinfos)?;
+    let msftp = Mutex::new(sftp);
+    filesinfos.into_par_iter().for_each(move |i| copy_file(&msftp, i, &map).unwrap());
     anyhow::Ok(())
 }
 
-fn get_folder_info(sftp: &Sftp, dirpath: &Path, prefix: &Path, filesinfos: &mut Vec<(PathBuf, PathBuf, u64)>, map: &mut HashMap<PathBuf, u64>) -> anyhow::Result<()> {
+// Arguments could be optimized
+fn get_folder_info(sftp: &Sftp, dirpath: &Path, prefix: &Path, filesinfos: &mut Vec<(PathBuf, PathBuf, u64)>) -> anyhow::Result<()> {
     println!("Path: {}", dirpath.to_str().unwrap());
     println!("Prefix: {}", prefix.to_str().unwrap());
     for f in sftp
@@ -50,7 +53,7 @@ fn get_folder_info(sftp: &Sftp, dirpath: &Path, prefix: &Path, filesinfos: &mut 
             }
             let prefixdir = &prefix.join(dirname);
             std::fs::create_dir_all(prefixdir)?;
-            get_folder_info(sftp, &dirpath.join(dirname), prefixdir, filesinfos, map)?;
+            get_folder_info(sftp, &dirpath.join(dirname), prefixdir, filesinfos)?;
         } else if let libssh_rs::FileType::Regular = filetype {
             let fname = f.name().ok_or(anyhow::anyhow!("Failed to get file name"))?;
             filesinfos.push((prefix.join(fname), dirpath.join(fname), f.len().ok_or(anyhow::anyhow!("Failed to get file size"))?));
@@ -61,9 +64,12 @@ fn get_folder_info(sftp: &Sftp, dirpath: &Path, prefix: &Path, filesinfos: &mut 
     anyhow::Ok(())
 }
 
-fn copy_file(sftp: &Sftp, filesinfo: (PathBuf, PathBuf, u64), map: &mut HashMap<PathBuf, u64>) -> anyhow::Result<()> {
+fn copy_file(msftp: &Mutex<Sftp>, filesinfo: (PathBuf, PathBuf, u64), mmap: &Mutex<HashMap<PathBuf, u64>>) -> anyhow::Result<()> {
+    let mut map = mmap.lock().expect("Map Mutex Poisoned");
+    let sftp = msftp.lock().expect("SFTP Mutex Poisoned");
     if let Some(fsize) = map.get(&filesinfo.0) {
         if *fsize != filesinfo.2 {
+            std::mem::drop(map);
             println!("Updated file: {:?}, {:?}, {:?}", filesinfo.0, filesinfo.1, filesinfo.2);
             let mut rfile = sftp.open(
                 &filesinfo.1
@@ -72,6 +78,7 @@ fn copy_file(sftp: &Sftp, filesinfo: (PathBuf, PathBuf, u64), map: &mut HashMap<
                 libssh_rs::OpenFlags::READ_ONLY,
                 0,
             )?;
+            std::mem::drop(sftp);
             let mut file = std::fs::File::open(&filesinfo.0)?;
             std::io::copy(&mut rfile, &mut file)?;
         }
@@ -85,9 +92,12 @@ fn copy_file(sftp: &Sftp, filesinfo: (PathBuf, PathBuf, u64), map: &mut HashMap<
             libssh_rs::OpenFlags::READ_ONLY,
             0,
         )?;
+        std::mem::drop(sftp);
+        // Locking logic of map could be more efficient
         let mut file = std::fs::File::create(&filesinfo.0)?;
-        std::io::copy(&mut rfile, &mut file)?;
         map.insert(filesinfo.0, filesinfo.2);
+        std::mem::drop(map);
+        std::io::copy(&mut rfile, &mut file)?;
     }
     anyhow::Ok(())
 }
