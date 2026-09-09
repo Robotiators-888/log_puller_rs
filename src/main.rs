@@ -25,12 +25,19 @@ fn main() -> anyhow::Result<()> {
     let sftp = session.sftp()?;
     get_folder_info(&sftp, Path::new("."), Path::new("data"), &mut filesinfos)?;
     let msftp = Mutex::new(sftp);
-    filesinfos.into_par_iter().for_each(move |i| copy_file(&msftp, i, &map).unwrap());
+    filesinfos
+        .into_par_iter()
+        .for_each(move |i| copy_file(&msftp, i, &map).unwrap());
     anyhow::Ok(())
 }
 
 // Arguments could be optimized
-fn get_folder_info(sftp: &Sftp, dirpath: &Path, prefix: &Path, filesinfos: &mut Vec<(PathBuf, PathBuf, u64)>) -> anyhow::Result<()> {
+fn get_folder_info(
+    sftp: &Sftp,
+    dirpath: &Path,
+    prefix: &Path,
+    filesinfos: &mut Vec<(PathBuf, PathBuf, u64)>,
+) -> anyhow::Result<()> {
     println!("Path: {}", dirpath.to_str().unwrap());
     println!("Prefix: {}", prefix.to_str().unwrap());
     for f in sftp
@@ -56,7 +63,11 @@ fn get_folder_info(sftp: &Sftp, dirpath: &Path, prefix: &Path, filesinfos: &mut 
             get_folder_info(sftp, &dirpath.join(dirname), prefixdir, filesinfos)?;
         } else if let libssh_rs::FileType::Regular = filetype {
             let fname = f.name().ok_or(anyhow::anyhow!("Failed to get file name"))?;
-            filesinfos.push((prefix.join(fname), dirpath.join(fname), f.len().ok_or(anyhow::anyhow!("Failed to get file size"))?));
+            filesinfos.push((
+                prefix.join(fname),
+                dirpath.join(fname),
+                f.len().ok_or(anyhow::anyhow!("Failed to get file size"))?,
+            ));
         } else {
             return anyhow::Result::Err(anyhow::anyhow!("Invalid file type encountered"));
         }
@@ -64,15 +75,23 @@ fn get_folder_info(sftp: &Sftp, dirpath: &Path, prefix: &Path, filesinfos: &mut 
     anyhow::Ok(())
 }
 
-fn copy_file(msftp: &Mutex<Sftp>, filesinfo: (PathBuf, PathBuf, u64), mmap: &Mutex<HashMap<PathBuf, u64>>) -> anyhow::Result<()> {
+fn copy_file(
+    msftp: &Mutex<Sftp>,
+    filesinfo: (PathBuf, PathBuf, u64),
+    mmap: &Mutex<HashMap<PathBuf, u64>>,
+) -> anyhow::Result<()> {
     let mut map = mmap.lock().expect("Map Mutex Poisoned");
     let sftp = msftp.lock().expect("SFTP Mutex Poisoned");
     if let Some(fsize) = map.get(&filesinfo.0) {
         if *fsize != filesinfo.2 {
             std::mem::drop(map);
-            println!("Updated file: {:?}, {:?}, {:?}", filesinfo.0, filesinfo.1, filesinfo.2);
+            println!(
+                "Updated file: {:?}, {:?}, {:?}",
+                filesinfo.0, filesinfo.1, filesinfo.2
+            );
             let mut rfile = sftp.open(
-                &filesinfo.1
+                &filesinfo
+                    .1
                     .to_str()
                     .ok_or(anyhow::anyhow!("Failed to join remote file path"))?,
                 libssh_rs::OpenFlags::READ_ONLY,
@@ -82,11 +101,14 @@ fn copy_file(msftp: &Mutex<Sftp>, filesinfo: (PathBuf, PathBuf, u64), mmap: &Mut
             let mut file = std::fs::File::open(&filesinfo.0)?;
             std::io::copy(&mut rfile, &mut file)?;
         }
-    }
-    else {
-        println!("Copied file: {:?}, {:?}, {:?}", filesinfo.0, filesinfo.1, filesinfo.2);
+    } else {
+        println!(
+            "Copied file: {:?}, {:?}, {:?}",
+            filesinfo.0, filesinfo.1, filesinfo.2
+        );
         let mut rfile = sftp.open(
-            &filesinfo.1
+            &filesinfo
+                .1
                 .to_str()
                 .ok_or(anyhow::anyhow!("Failed to join remote file path"))?,
             libssh_rs::OpenFlags::READ_ONLY,
@@ -105,16 +127,16 @@ fn copy_file(msftp: &Mutex<Sftp>, filesinfo: (PathBuf, PathBuf, u64), mmap: &Mut
 // Make it recursive
 fn populate_map(path: &Path, map: &mut HashMap<PathBuf, u64>) -> std::io::Result<()> {
     let mut ret: std::io::Result<()> = Ok(());
-    let dir = std::fs::read_dir(path)?.into_iter().collect::<std::io::Result<Box<[std::fs::DirEntry]>>>()?;
+    let dir = std::fs::read_dir(path)?
+        .into_iter()
+        .collect::<std::io::Result<Box<[std::fs::DirEntry]>>>()?;
     for f in dir.into_iter() {
         let ftype = f.file_type()?;
         if ftype.is_dir() {
             populate_map(&path.join(f.file_name()), map)?;
-        }
-        else if ftype.is_file() {
+        } else if ftype.is_file() {
             map.insert(path.join(f.file_name()), f.metadata()?.len());
-        }
-        else {
+        } else {
             ret = Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, ""));
         }
     }
