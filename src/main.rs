@@ -106,6 +106,11 @@ fn copy_file(
             "Copied file: {:?}, {:?}, {:?}",
             filesinfo.0, filesinfo.1, filesinfo.2
         );
+        // Locking logic of map could probably still be more efficient
+        let mut file = std::fs::File::create(&filesinfo.0)?; // Blocking io locking a mutex :(
+        map.insert(filesinfo.0, filesinfo.2);
+        // Map is more important to drop even though creating the file holds sftp for longer
+        std::mem::drop(map); 
         let mut rfile = sftp.open(
             &filesinfo
                 .1
@@ -115,10 +120,6 @@ fn copy_file(
             0,
         )?;
         std::mem::drop(sftp);
-        // Locking logic of map could be more efficient
-        let mut file = std::fs::File::create(&filesinfo.0)?;
-        map.insert(filesinfo.0, filesinfo.2);
-        std::mem::drop(map);
         std::io::copy(&mut rfile, &mut file)?;
     }
     anyhow::Ok(())
