@@ -7,13 +7,11 @@ use std::{
 };
 
 fn main() -> anyhow::Result<()> {
-    // Is Box<[Path]> better?
     let mut map: HashMap<PathBuf, u64> = HashMap::new();
     // Use notifications to deal with this later
     populate_map(Path::new("data"), &mut map);
     println!("{:?}", map);
     let map: Mutex<HashMap<PathBuf, u64>> = Mutex::new(map);
-    // // Is Box<[]> better again?
     let mut filesinfos: Vec<(PathBuf, PathBuf, u64)> = Vec::new();
     let session = Session::new()?;
     // session.set_option(libssh_rs::SshOption::Hostname(String::from("localhost")))?;
@@ -125,7 +123,6 @@ fn copy_file(
     anyhow::Ok(())
 }
 
-// Make it recursive
 fn populate_map(path: &Path, map: &mut HashMap<PathBuf, u64>) -> std::io::Result<()> {
     let mut ret: std::io::Result<()> = Ok(());
     let dir = std::fs::read_dir(path)?
@@ -138,7 +135,7 @@ fn populate_map(path: &Path, map: &mut HashMap<PathBuf, u64>) -> std::io::Result
         } else if ftype.is_file() {
             map.insert(path.join(f.file_name()), f.metadata()?.len());
         } else {
-            ret = Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, ""));
+            ret = Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid file type"));
         }
     }
     ret
