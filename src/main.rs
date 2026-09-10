@@ -79,14 +79,31 @@ fn copy_file(
     mmap: &Mutex<HashMap<PathBuf, u64>>,
 ) -> anyhow::Result<()> {
     let mut map = mmap.lock().expect("Map Mutex Poisoned");
-    let sftp = msftp.lock().expect("SFTP Mutex Poisoned");
-    if let Some(fsize) = map.get(&filesinfo.0) {
+    let mut needs_copy = false;
+    let mut new_file = false;
+    if let Some(fsize) = map.get_mut(&filesinfo.0) {
         if *fsize != filesinfo.2 {
+            *fsize = filesinfo.2;
+            needs_copy = true;
             std::mem::drop(map);
+        }
+    } else {
+        needs_copy = true;
+        new_file = true;
+        std::mem::drop(map); 
+    }
+    if needs_copy { 
+        if new_file {
             println!(
-                "Updated file: {:?}, {:?}, {:?}",
+                "Copied file: {:?}, {:?}, {:?}",
                 filesinfo.0, filesinfo.1, filesinfo.2
             );
+            // Locking logic of map could probably still be more efficient
+            let mut file = std::fs::File::create(&filesinfo.0)?; // Blocking io locking a mutex :(
+            let mut map = mmap.lock().expect("Map Mutex Poisoned");
+            map.insert(filesinfo.0, filesinfo.2);
+            std::mem::drop(map);
+            let sftp = msftp.lock().expect("SFTP Mutex Poisoned");
             let mut rfile = sftp.open(
                 &filesinfo
                     .1
@@ -96,29 +113,26 @@ fn copy_file(
                 0,
             )?;
             std::mem::drop(sftp);
-            let mut file = std::fs::File::open(&filesinfo.0)?;
             std::io::copy(&mut rfile, &mut file)?;
         }
-    } else {
-        println!(
-            "Copied file: {:?}, {:?}, {:?}",
-            filesinfo.0, filesinfo.1, filesinfo.2
-        );
-        // Locking logic of map could probably still be more efficient
-        let mut file = std::fs::File::create(&filesinfo.0)?; // Blocking io locking a mutex :(
-        map.insert(filesinfo.0, filesinfo.2);
-        // Map is more important to drop even though creating the file holds sftp for longer
-        std::mem::drop(map); 
-        let mut rfile = sftp.open(
-            &filesinfo
-                .1
-                .to_str()
-                .ok_or(anyhow::anyhow!("Failed to join remote file path"))?,
-            libssh_rs::OpenFlags::READ_ONLY,
-            0,
-        )?;
-        std::mem::drop(sftp);
-        std::io::copy(&mut rfile, &mut file)?;
+        else {
+            println!(
+                "Updated file: {:?}, {:?}, {:?}",
+                filesinfo.0, filesinfo.1, filesinfo.2
+            );
+            let mut file = std::fs::File::open(&filesinfo.0)?;
+            let sftp = msftp.lock().expect("SFTP Mutex Poisoned");
+            let mut rfile = sftp.open(
+                &filesinfo
+                    .1
+                    .to_str()
+                    .ok_or(anyhow::anyhow!("Failed to join remote file path"))?,
+                libssh_rs::OpenFlags::READ_ONLY,
+                0,
+            )?;
+            std::mem::drop(sftp);
+            std::io::copy(&mut rfile, &mut file)?;
+        }
     }
     anyhow::Ok(())
 }
