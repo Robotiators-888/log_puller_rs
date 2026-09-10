@@ -11,7 +11,7 @@ fn main() -> anyhow::Result<()> {
     // Use notifications to deal with this later
     populate_map(Path::new("data"), &mut map);
     println!("{:?}", map);
-    let map: Mutex<HashMap<PathBuf, u64>> = Mutex::new(map);
+    let map: dashmap::DashMap<PathBuf, u64> = map.into_iter().collect();
     let mut filesinfos: Vec<(PathBuf, PathBuf, u64)> = Vec::new();
     let session = Session::new()?;
     // session.set_option(libssh_rs::SshOption::Hostname(String::from("localhost")))?;
@@ -76,21 +76,18 @@ fn get_folder_info(
 fn copy_file(
     msftp: &Mutex<Sftp>,
     filesinfo: (PathBuf, PathBuf, u64),
-    mmap: &Mutex<HashMap<PathBuf, u64>>,
+    map: &dashmap::DashMap<PathBuf, u64>,
 ) -> anyhow::Result<()> {
-    let mut map = mmap.lock().expect("Map Mutex Poisoned");
     let mut needs_copy = false;
     let mut new_file = false;
-    if let Some(fsize) = map.get_mut(&filesinfo.0) {
+    if let Some(mut fsize) = map.get_mut(&filesinfo.0) {
         if *fsize != filesinfo.2 {
             *fsize = filesinfo.2;
             needs_copy = true;
-            std::mem::drop(map);
         }
     } else {
         needs_copy = true;
         new_file = true;
-        std::mem::drop(map); 
     }
     if needs_copy { 
         if new_file {
@@ -100,9 +97,7 @@ fn copy_file(
             );
             // Locking logic of map could probably still be more efficient
             let mut file = std::fs::File::create(&filesinfo.0)?; // Blocking io locking a mutex :(
-            let mut map = mmap.lock().expect("Map Mutex Poisoned");
             map.insert(filesinfo.0, filesinfo.2);
-            std::mem::drop(map);
             let sftp = msftp.lock().expect("SFTP Mutex Poisoned");
             let mut rfile = sftp.open(
                 &filesinfo

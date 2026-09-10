@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
+dashmap = "6.2.1"
 libssh-rs = { version = "0.3.8", features = ["vendored", "vendored-openssl"] }
 rayon = "1.12.0"
 
