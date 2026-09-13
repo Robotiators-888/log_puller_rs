@@ -46,28 +46,27 @@ fn get_folder_info(
         )?
         .into_iter()
     {
-        let filetype = f
-            .file_type()
-            .ok_or(anyhow::anyhow!("Failed to get file type"))?;
         // If its a directory then call the function recursivley, copy if its a file, otherwise return an error
         // Might make this a match statement to be cleaner
-        if let libssh_rs::FileType::Directory = filetype {
-            let dirname = f.name().ok_or(anyhow::anyhow!("Failed to get file name"))?;
-            if dirname == "." || dirname == ".." {
-                continue;
+        match f.file_type().ok_or(anyhow::anyhow!("Failed to get file type"))? {
+            libssh_rs::FileType::Directory => {
+                let dirname = f.name().ok_or(anyhow::anyhow!("Failed to get file name"))?;
+                if dirname == "." || dirname == ".." {
+                    continue;
+                }
+                let prefixdir = &prefix.join(dirname);
+                std::fs::create_dir_all(prefixdir)?;
+                get_folder_info(sftp, &dirpath.join(dirname), prefixdir, filesinfos)?;
             }
-            let prefixdir = &prefix.join(dirname);
-            std::fs::create_dir_all(prefixdir)?;
-            get_folder_info(sftp, &dirpath.join(dirname), prefixdir, filesinfos)?;
-        } else if let libssh_rs::FileType::Regular = filetype {
-            let fname = f.name().ok_or(anyhow::anyhow!("Failed to get file name"))?;
-            filesinfos.push((
-                prefix.join(fname),
-                dirpath.join(fname),
-                f.len().ok_or(anyhow::anyhow!("Failed to get file size"))?,
-            ));
-        } else {
-            return anyhow::Result::Err(anyhow::anyhow!("Invalid file type encountered"));
+            libssh_rs::FileType::Regular => {
+                let fname = f.name().ok_or(anyhow::anyhow!("Failed to get file name"))?;
+                filesinfos.push((
+                    prefix.join(fname),
+                    dirpath.join(fname),
+                    f.len().ok_or(anyhow::anyhow!("Failed to get file size"))?,
+                ));
+            }
+            _ => return anyhow::Result::Err(anyhow::anyhow!("Invalid file type encountered"))
         }
     }
     anyhow::Ok(())
