@@ -2,17 +2,17 @@ use libssh_rs::{Session, Sftp};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::{
     collections::HashMap,
-    path::{Path, PathBuf},
+    path::Path,
     sync::Mutex,
 };
 
 fn main() -> anyhow::Result<()> {
-    let mut map: HashMap<PathBuf, u64> = HashMap::new();
+    let mut map: HashMap<Box<Path>, u64> = HashMap::new();
     // Use notifications to deal with this later
     populate_map(Path::new("data"), &mut map);
     println!("{:?}", map);
-    let map: dashmap::DashMap<PathBuf, u64> = map.into_iter().collect();
-    let mut filesinfos: Vec<(PathBuf, PathBuf, u64)> = Vec::new();
+    let map: dashmap::DashMap<Box<Path>, u64> = map.into_iter().collect();
+    let mut filesinfos: Vec<(Box<Path>, Box<Path>, u64)> = Vec::new();
     let session = Session::new()?;
     // session.set_option(libssh_rs::SshOption::Hostname(String::from("localhost")))?;
     session.set_option(libssh_rs::SshOption::Hostname(String::from(
@@ -34,7 +34,7 @@ fn get_folder_info(
     sftp: &Sftp,
     dirpath: &Path,
     prefix: &Path,
-    filesinfos: &mut Vec<(PathBuf, PathBuf, u64)>,
+    filesinfos: &mut Vec<(Box<Path>, Box<Path>, u64)>,
 ) -> anyhow::Result<()> {
     println!("Path: {}", dirpath.to_str().unwrap());
     println!("Prefix: {}", prefix.to_str().unwrap());
@@ -61,8 +61,8 @@ fn get_folder_info(
             libssh_rs::FileType::Regular => {
                 let fname = f.name().ok_or(anyhow::anyhow!("Failed to get file name"))?;
                 filesinfos.push((
-                    prefix.join(fname),
-                    dirpath.join(fname),
+                    prefix.join(fname).into_boxed_path(),
+                    dirpath.join(fname).into_boxed_path(),
                     f.len().ok_or(anyhow::anyhow!("Failed to get file size"))?,
                 ));
             }
@@ -74,8 +74,8 @@ fn get_folder_info(
 
 fn copy_file(
     msftp: &Mutex<Sftp>,
-    filesinfo: (PathBuf, PathBuf, u64),
-    map: &dashmap::DashMap<PathBuf, u64>,
+    filesinfo: (Box<Path>, Box<Path>, u64),
+    map: &dashmap::DashMap<Box<Path>, u64>,
 ) -> anyhow::Result<()> {
     let mut needs_copy = false;
     let mut new_file = false;
@@ -131,7 +131,7 @@ fn copy_file(
     anyhow::Ok(())
 }
 
-fn populate_map(path: &Path, map: &mut HashMap<PathBuf, u64>) -> std::io::Result<()> {
+fn populate_map(path: &Path, map: &mut HashMap<Box<Path>, u64>) -> std::io::Result<()> {
     let mut ret: std::io::Result<()> = Ok(());
     let dir = std::fs::read_dir(path)?
         .into_iter()
@@ -141,7 +141,7 @@ fn populate_map(path: &Path, map: &mut HashMap<PathBuf, u64>) -> std::io::Result
         if ftype.is_dir() {
             populate_map(&path.join(f.file_name()), map)?;
         } else if ftype.is_file() {
-            map.insert(path.join(f.file_name()), f.metadata()?.len());
+            map.insert(path.join(f.file_name()).into_boxed_path(), f.metadata()?.len());
         } else {
             ret = Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid file type"));
         }
