@@ -9,24 +9,54 @@ use std::{
 fn main() -> anyhow::Result<()> {
     let mut map: HashMap<Box<Path>, u64> = HashMap::new();
     // Use notifications to deal with this later
-    populate_map(Path::new("data"), &mut map);
+    match populate_map(Path::new("data"), &mut map) {
+        Ok(_) => {}
+        Err(e) => {
+            let _ = notify_rust::Notification::new()
+                .summary("Error populating map")
+                .body(&format!("Error: {}", e))
+                .show();
+            // return anyhow::Result::Err(anyhow::anyhow!("Error populating map: {}", e));
+        }
+    }
     println!("{:?}", map);
     let map: dashmap::DashMap<Box<Path>, u64> = map.into_iter().collect();
-    let mut filesinfos: Vec<(Box<Path>, Box<Path>, u64)> = Vec::new();
+    if let Err(e) = pull_logs(&map) {
+        eprintln!("{}", e);
+    }
+    anyhow::Ok(())
+}
+
+fn pull_logs(map: &dashmap::DashMap<Box<Path>, u64>) -> anyhow::Result<()> {
     let session = Session::new()?;
     // session.set_option(libssh_rs::SshOption::Hostname(String::from("localhost")))?;
     session.set_option(libssh_rs::SshOption::Hostname(String::from(
-        "test.rebex.net",
+        "test.rebex.net"
     )))?;
+    session.set_option(libssh_rs::SshOption::User(Some(String::from("demo"))))?;
     session.connect()?;
-    session.userauth_password(Some("demo"), Some("password"))?;
+    session.userauth_password(None, Some("password"))?;
+    println!("Hi");
     let sftp = session.sftp()?;
-    get_folder_info(&sftp, Path::new("."), Path::new("data"), &mut filesinfos)?;
+    let mut filesinfos: Vec<(Box<Path>, Box<Path>, u64)> = Vec::new();
+    if let Err(e) = get_folder_info(&sftp, Path::new("."), Path::new("data"), &mut filesinfos) {
+        notify_rust::Notification::new()
+            .summary("Error getting folder info")
+            .body(&format!("Error: {}", e))
+            .show()?;
+    }
     let msftp = Mutex::new(sftp);
-    filesinfos
+    let copy_result = filesinfos
         .into_par_iter()
-        .for_each(move |i| copy_file(&msftp, i, &map).unwrap());
-    anyhow::Ok(())
+        .map(move |i| copy_file(&msftp, i, &map))
+        .collect::<anyhow::Result<()>>();
+    if let Err(e) = copy_result {
+        notify_rust::Notification::new()
+            .summary("Error populating map")
+            .body(&format!("Error: {}", e))
+            .show()?;
+    }
+    anyhow::Result::Ok(())
 }
 
 // Arguments could be optimized
@@ -47,7 +77,6 @@ fn get_folder_info(
         .into_iter()
     {
         // If its a directory then call the function recursivley, copy if its a file, otherwise return an error
-        // Might make this a match statement to be cleaner
         match f.file_type().ok_or(anyhow::anyhow!("Failed to get file type"))? {
             libssh_rs::FileType::Directory => {
                 let dirname = f.name().ok_or(anyhow::anyhow!("Failed to get file name"))?;
