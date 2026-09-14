@@ -1,85 +1,132 @@
 use libssh_rs::{Session, Sftp};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::{
-    collections::HashMap,
-    path::Path,
-    sync::Mutex,
+    collections::HashMap, path::Path, sync::Mutex, time::Duration,
 };
 
-fn main() -> anyhow::Result<()> {
+#[derive(Debug)]
+enum AppError {
+    Io(std::io::Error),
+    Ssh(libssh_rs::Error),
+    Custom(String),
+}
+
+impl std::fmt::Display for AppError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AppError::Io(e) => write!(f, "IO Error: {}", e),
+            AppError::Ssh(e) => write!(f, "SSH Error: {}", e),
+            AppError::Custom(msg) => write!(f, "{}", msg),
+        }
+    }
+}
+
+impl std::error::Error for AppError {}
+
+impl From<std::io::Error> for AppError {
+    fn from(err: std::io::Error) -> Self {
+        AppError::Io(err)
+    }
+}
+
+impl From<libssh_rs::Error> for AppError {
+    fn from(err: libssh_rs::Error) -> Self {
+        AppError::Ssh(err)
+    }
+}
+
+impl From<&str> for AppError {
+    fn from(err: &str) -> Self {
+        AppError::Custom(err.to_string())
+    }
+}
+
+fn main() -> Result<(), AppError> {
     let mut map: HashMap<Box<Path>, u64> = HashMap::new();
-    // Use notifications to deal with this later
+    
     match populate_map(Path::new("data"), &mut map) {
         Ok(_) => {}
         Err(e) => {
             let _ = notify_rust::Notification::new()
                 .summary("Error populating map")
-                .body(&format!("Error: {}", e))
+                .body(&format!("This is completely okay (most of the time), this will always happen if the logs folder is empty\nError: {}", e))
                 .show();
-            // return anyhow::Result::Err(anyhow::anyhow!("Error populating map: {}", e));
         }
     }
-    println!("{:?}", map);
+    
+    println!("Map: {:?}", map);
     let map: dashmap::DashMap<Box<Path>, u64> = map.into_iter().collect();
-    if let Err(e) = pull_logs(&map) {
-        eprintln!("{}", e);
+    
+    let mut sleeptime: Duration;
+    loop {
+        if let Err(e) = pull_logs(&map) {
+            eprintln!("{}", e);
+            sleeptime = Duration::from_secs(60);
+        }
+        else {
+            sleeptime = Duration::from_secs(3);
+        }
+        std::thread::sleep(sleeptime);
     }
-    anyhow::Ok(())
+    
+    // Ok(())
 }
 
-fn pull_logs(map: &dashmap::DashMap<Box<Path>, u64>) -> anyhow::Result<()> {
+fn pull_logs(map: &dashmap::DashMap<Box<Path>, u64>) -> Result<(), AppError> {
     let session = Session::new()?;
-    // session.set_option(libssh_rs::SshOption::Hostname(String::from("localhost")))?;
     session.set_option(libssh_rs::SshOption::Hostname(String::from(
-        "test.rebex.net"
+        "test.rebex.net",
     )))?;
     session.set_option(libssh_rs::SshOption::User(Some(String::from("demo"))))?;
     session.connect()?;
     session.userauth_password(None, Some("password"))?;
-    println!("Hi");
+    
     let sftp = session.sftp()?;
     let mut filesinfos: Vec<(Box<Path>, Box<Path>, u64)> = Vec::new();
+    
     if let Err(e) = get_folder_info(&sftp, Path::new("."), Path::new("data"), &mut filesinfos) {
         notify_rust::Notification::new()
             .summary("Error getting folder info")
             .body(&format!("Error: {}", e))
-            .show()?;
+            .show()
+            .map_err(|n_err| AppError::Custom(n_err.to_string()))?;
     }
+    
     let msftp = Mutex::new(sftp);
     let copy_result = filesinfos
         .into_par_iter()
         .map(move |i| copy_file(&msftp, i, &map))
-        .collect::<anyhow::Result<()>>();
+        .collect::<Result<(), AppError>>();
+        
     if let Err(e) = copy_result {
         notify_rust::Notification::new()
-            .summary("Error populating map")
+            .summary("Error copying files")
             .body(&format!("Error: {}", e))
-            .show()?;
+            .show()
+            .map_err(|n_err| AppError::Custom(n_err.to_string()))?;
     }
-    anyhow::Result::Ok(())
+    
+    Ok(())
 }
 
-// Arguments could be optimized
 fn get_folder_info(
     sftp: &Sftp,
     dirpath: &Path,
     prefix: &Path,
     filesinfos: &mut Vec<(Box<Path>, Box<Path>, u64)>,
-) -> anyhow::Result<()> {
-    println!("Path: {}", dirpath.to_str().unwrap());
-    println!("Prefix: {}", prefix.to_str().unwrap());
-    for f in sftp
-        .read_dir(
-            dirpath
-                .to_str()
-                .ok_or(anyhow::anyhow!("Couldn't convert path to str"))?,
-        )?
-        .into_iter()
-    {
-        // If its a directory then call the function recursivley, copy if its a file, otherwise return an error
-        match f.file_type().ok_or(anyhow::anyhow!("Failed to get file type"))? {
+) -> Result<(), AppError> {
+    println!("Path: {}", dirpath.to_str().unwrap_or(""));
+    println!("Prefix: {}", prefix.to_str().unwrap_or(""));
+    
+    let path_str = dirpath
+        .to_str()
+        .ok_or("Couldn't convert path to str")?;
+
+    for f in sftp.read_dir(path_str)?.into_iter() {
+        let ftype = f.file_type().ok_or("Failed to get file type")?;
+        match ftype {
             libssh_rs::FileType::Directory => {
-                let dirname = f.name().ok_or(anyhow::anyhow!("Failed to get file name"))?;
+                let dirname = f.name().ok_or("Failed to get file name")?;
                 if dirname == "." || dirname == ".." {
                     continue;
                 }
@@ -88,26 +135,28 @@ fn get_folder_info(
                 get_folder_info(sftp, &dirpath.join(dirname), prefixdir, filesinfos)?;
             }
             libssh_rs::FileType::Regular => {
-                let fname = f.name().ok_or(anyhow::anyhow!("Failed to get file name"))?;
+                let fname = f.name().ok_or("Failed to get file name")?;
+                let f_len = f.len().ok_or("Failed to get file size")?;
                 filesinfos.push((
                     prefix.join(fname).into_boxed_path(),
                     dirpath.join(fname).into_boxed_path(),
-                    f.len().ok_or(anyhow::anyhow!("Failed to get file size"))?,
+                    f_len,
                 ));
             }
-            _ => return anyhow::Result::Err(anyhow::anyhow!("Invalid file type encountered"))
+            _ => return Err("Invalid file type encountered".into()),
         }
     }
-    anyhow::Ok(())
+    Ok(())
 }
 
 fn copy_file(
     msftp: &Mutex<Sftp>,
     filesinfo: (Box<Path>, Box<Path>, u64),
     map: &dashmap::DashMap<Box<Path>, u64>,
-) -> anyhow::Result<()> {
+) -> Result<(), AppError> {
     let mut needs_copy = false;
     let mut new_file = false;
+    
     if let Some(mut fsize) = map.get_mut(&filesinfo.0) {
         if *fsize != filesinfo.2 {
             *fsize = filesinfo.2;
@@ -117,54 +166,60 @@ fn copy_file(
         needs_copy = true;
         new_file = true;
     }
+    
     if needs_copy { 
+        let remote_path_str = filesinfo
+            .1
+            .to_str()
+            .ok_or("Failed to join remote file path")?;
+
         if new_file {
             println!(
                 "Copied file: {:?}, {:?}, {:?}",
                 filesinfo.0, filesinfo.1, filesinfo.2
             );
-            // Locking logic of map could probably still be more efficient
-            let mut file = std::fs::File::create(&filesinfo.0)?; // Blocking io locking a mutex :(
+            let mut file = std::fs::File::create(&filesinfo.0)?;
             map.insert(filesinfo.0, filesinfo.2);
-            let sftp = msftp.lock().expect("SFTP Mutex Poisoned");
+            
+            let sftp = msftp.lock().map_err(|_| "SFTP Mutex Poisoned")?;
             let mut rfile = sftp.open(
-                &filesinfo
-                    .1
-                    .to_str()
-                    .ok_or(anyhow::anyhow!("Failed to join remote file path"))?,
+                remote_path_str,
                 libssh_rs::OpenFlags::READ_ONLY,
                 0,
             )?;
-            std::mem::drop(sftp);
+            drop(sftp);
             std::io::copy(&mut rfile, &mut file)?;
-        }
-        else {
+        } else {
             println!(
                 "Updated file: {:?}, {:?}, {:?}",
                 filesinfo.0, filesinfo.1, filesinfo.2
             );
             let mut file = std::fs::File::open(&filesinfo.0)?;
-            let sftp = msftp.lock().expect("SFTP Mutex Poisoned");
+            
+            let sftp = msftp.lock().map_err(|_| "SFTP Mutex Poisoned")?;
             let mut rfile = sftp.open(
-                &filesinfo
-                    .1
-                    .to_str()
-                    .ok_or(anyhow::anyhow!("Failed to join remote file path"))?,
+                remote_path_str,
                 libssh_rs::OpenFlags::READ_ONLY,
                 0,
             )?;
-            std::mem::drop(sftp);
+            drop(sftp);
             std::io::copy(&mut rfile, &mut file)?;
         }
     }
-    anyhow::Ok(())
+    else {
+        println!(
+            "Skipped file: {:?}, {:?}, {:?}",
+            filesinfo.0, filesinfo.1, filesinfo.2
+        );
+    }
+    Ok(())
 }
 
 fn populate_map(path: &Path, map: &mut HashMap<Box<Path>, u64>) -> std::io::Result<()> {
-    let mut ret: std::io::Result<()> = Ok(());
     let dir = std::fs::read_dir(path)?
         .into_iter()
         .collect::<std::io::Result<Box<[std::fs::DirEntry]>>>()?;
+        
     for f in dir.into_iter() {
         let ftype = f.file_type()?;
         if ftype.is_dir() {
@@ -172,8 +227,8 @@ fn populate_map(path: &Path, map: &mut HashMap<Box<Path>, u64>) -> std::io::Resu
         } else if ftype.is_file() {
             map.insert(path.join(f.file_name()).into_boxed_path(), f.metadata()?.len());
         } else {
-            ret = Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid file type"));
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid file type"));
         }
     }
-    ret
+    Ok(())
 }
