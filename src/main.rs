@@ -59,9 +59,9 @@ fn main() -> Result<(), AppError> {
     loop {
         if let Err(e) = pull_logs(&map) {
             eprintln!("{}", e);
-            sleeptime = Duration::from_secs(60);
-        } else {
             sleeptime = Duration::from_secs(3);
+        } else {
+            sleeptime = Duration::from_secs(60);
         }
         std::thread::sleep(sleeptime);
     }
