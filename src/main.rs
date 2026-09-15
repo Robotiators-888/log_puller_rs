@@ -86,7 +86,7 @@ fn pull_logs(map: &dashmap::DashMap<Box<Path>, u64>) -> Result<(), AppError> {
     let sftp = create_sftp_session()?;
     let mut filesinfos: Vec<(Box<Path>, Box<Path>, u64)> = Vec::with_capacity(map.len());
 
-    if let Err(e) = get_folder_info(&sftp, Path::new(r"/media/sda1/logs"), Path::new("data"), &mut filesinfos) {
+    if let Err(e) = get_folder_info(&sftp, Path::new("/media/sda1/logs"), Path::new("data"), &mut filesinfos) {
         notify_rust::Notification::new()
             .summary("Error getting folder info")
             .body(&format!("Error: {}", e))
