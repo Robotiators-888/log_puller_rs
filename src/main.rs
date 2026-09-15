@@ -42,14 +42,11 @@ impl From<&str> for AppError {
 fn main() -> Result<(), AppError> {
     let mut map: HashMap<Box<Path>, u64> = HashMap::new();
 
-    match populate_map(Path::new("data"), &mut map) {
-        Ok(_) => {}
-        Err(e) => {
-            let _ = notify_rust::Notification::new()
-                .summary("Error populating map")
-                .body(&format!("This is completely okay (most of the time), this will always happen if the logs folder is empty\nError: {}", e))
-                .show();
-        }
+    if let Err(e) = populate_map(Path::new("data"), &mut map) {
+        let _ = notify_rust::Notification::new()
+            .summary("Error populating map")
+            .body(&format!("This is completely okay (most of the time), this will always happen if the logs folder is empty\nError: {}", e))
+            .show();
     }
 
     println!("Map: {:?}", map);
