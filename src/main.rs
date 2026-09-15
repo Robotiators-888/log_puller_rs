@@ -76,7 +76,7 @@ fn pull_logs(map: &dashmap::DashMap<Box<Path>, u64>) -> Result<(), AppError> {
     session.userauth_password(None, Some("password"))?;
 
     let sftp = session.sftp()?;
-    let mut filesinfos: Vec<(Box<Path>, Box<Path>, u64)> = Vec::new();
+    let mut filesinfos: Vec<(Box<Path>, Box<Path>, u64)> = Vec::with_capacity(map.len());
 
     if let Err(e) = get_folder_info(&sftp, Path::new("."), Path::new("data"), &mut filesinfos) {
         notify_rust::Notification::new()
