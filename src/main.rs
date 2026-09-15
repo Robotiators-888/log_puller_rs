@@ -71,10 +71,10 @@ fn main() -> Result<(), AppError> {
 
 fn create_sftp_session() -> Result<Sftp, AppError> {
     let session = Session::new()?;
-    session.set_option(libssh_rs::SshOption::Hostname(String::from("test.rebex.net")))?;
-    session.set_option(libssh_rs::SshOption::User(Some(String::from("demo"))))?;
+    session.set_option(libssh_rs::SshOption::Hostname(String::from("10.8.88.2")))?;
+    session.set_option(libssh_rs::SshOption::User(Some(String::from("admin"))))?;
     session.connect()?;
-    session.userauth_password(None, Some("password"))?;
+    session.userauth_password(None, Some(""))?;
     
     let sftp = session.sftp()?;
     Ok(sftp)
@@ -84,7 +84,7 @@ fn pull_logs(map: &dashmap::DashMap<Box<Path>, u64>) -> Result<(), AppError> {
     let sftp = create_sftp_session()?;
     let mut filesinfos: Vec<(Box<Path>, Box<Path>, u64)> = Vec::with_capacity(map.len());
 
-    if let Err(e) = get_folder_info(&sftp, Path::new("."), Path::new("data"), &mut filesinfos) {
+    if let Err(e) = get_folder_info(&sftp, Path::new("/media/sda1/logs"), Path::new("data"), &mut filesinfos) {
         notify_rust::Notification::new()
             .summary("Error getting folder info")
             .body(&format!("Error: {}", e))
@@ -118,9 +118,9 @@ fn get_folder_info(
     println!("Path: {}", dirpath.to_str().unwrap_or(""));
     println!("Prefix: {}", prefix.to_str().unwrap_or(""));
 
-    let path_str = dirpath.to_str().ok_or("Couldn't convert path to str")?;
+    let path_str = dirpath.to_str().ok_or("Couldn't convert path to str")?.replace('\\', "/");
 
-    for f in sftp.read_dir(path_str)?.into_iter() {
+    for f in sftp.read_dir(&path_str)?.into_iter() {
         let ftype = f.file_type().ok_or("Failed to get file type")?;
         match ftype {
             libssh_rs::FileType::Directory => {
@@ -169,7 +169,8 @@ fn copy_file(
         let remote_path_str = filesinfo
             .1
             .to_str()
-            .ok_or("Failed to join remote file path")?;
+            .ok_or("Failed to join remote file path")?
+            .replace('\\', "/");
 
         if new_file {
             println!(
@@ -179,7 +180,7 @@ fn copy_file(
             let mut file = std::fs::File::create(&filesinfo.0)?;
             map.insert(filesinfo.0, filesinfo.2);
 
-            let mut rfile = sftp.open(remote_path_str, libssh_rs::OpenFlags::READ_ONLY, 0)?;
+            let mut rfile = sftp.open(&remote_path_str, libssh_rs::OpenFlags::READ_ONLY, 0)?;
             std::io::copy(&mut rfile, &mut file)?;
         } else {
             println!(
@@ -188,7 +189,7 @@ fn copy_file(
             );
             let mut file = std::fs::File::create(&filesinfo.0)?;
 
-            let mut rfile = sftp.open(remote_path_str, libssh_rs::OpenFlags::READ_ONLY, 0)?;
+            let mut rfile = sftp.open(&remote_path_str, libssh_rs::OpenFlags::READ_ONLY, 0)?;
             std::io::copy(&mut rfile, &mut file)?;
         }
     } else {
