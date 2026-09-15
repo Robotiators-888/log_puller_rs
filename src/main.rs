@@ -182,7 +182,7 @@ fn copy_file(
                 "Updated file: {:?}, {:?}, {:?}",
                 filesinfo.0, filesinfo.1, filesinfo.2
             );
-            let mut file = std::fs::File::open(&filesinfo.0)?;
+            let mut file = std::fs::File::create(&filesinfo.0)?;
 
             let sftp = msftp.lock().map_err(|_| "SFTP Mutex Poisoned")?;
             let mut rfile = sftp.open(remote_path_str, libssh_rs::OpenFlags::READ_ONLY, 0)?;
@@ -199,11 +199,8 @@ fn copy_file(
 }
 
 fn populate_map(path: &Path, map: &mut HashMap<Box<Path>, u64>) -> std::io::Result<()> {
-    let dir = std::fs::read_dir(path)?
-        .into_iter()
-        .collect::<std::io::Result<Box<[std::fs::DirEntry]>>>()?;
-
-    for f in dir.into_iter() {
+    for f in std::fs::read_dir(path)?.into_iter() {
+        let f = f?;
         let ftype = f.file_type()?;
         if ftype.is_dir() {
             populate_map(&path.join(f.file_name()), map)?;
