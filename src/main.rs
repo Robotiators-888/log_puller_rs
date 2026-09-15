@@ -120,7 +120,7 @@ fn get_folder_info(
     println!("Path: {}", dirpath.to_str().unwrap_or(""));
     println!("Prefix: {}", prefix.to_str().unwrap_or(""));
 
-    let path_str = dirpath.to_str().ok_or("Couldn't convert path to str")?;
+    let path_str = dirpath.to_str().ok_or("Couldn't convert path to str")?.replace("\\", "/");
 
     for f in sftp.read_dir(&path_str)?.into_iter() {
         let ftype = f.file_type().ok_or("Failed to get file type")?;
@@ -171,7 +171,8 @@ fn copy_file(
         let remote_path_str = filesinfo
             .1
             .to_str()
-            .ok_or("Failed to join remote file path")?;
+            .ok_or("Failed to join remote file path")?
+            .replace("\\", "/");
 
         if new_file {
             println!(
