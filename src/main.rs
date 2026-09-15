@@ -1,6 +1,6 @@
 use libssh_rs::{Session, Sftp};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use std::{collections::HashMap, path::Path, sync::Mutex, time::Duration};
+use std::{collections::HashMap, path::Path, time::Duration};
 
 #[derive(Debug)]
 enum AppError {
@@ -66,16 +66,19 @@ fn main() -> Result<(), AppError> {
     // Ok(())
 }
 
-fn pull_logs(map: &dashmap::DashMap<Box<Path>, u64>) -> Result<(), AppError> {
+fn create_sftp_session() -> Result<Sftp, AppError> {
     let session = Session::new()?;
-    session.set_option(libssh_rs::SshOption::Hostname(String::from(
-        "test.rebex.net",
-    )))?;
+    session.set_option(libssh_rs::SshOption::Hostname(String::from("test.rebex.net")))?;
     session.set_option(libssh_rs::SshOption::User(Some(String::from("demo"))))?;
     session.connect()?;
     session.userauth_password(None, Some("password"))?;
-
+    
     let sftp = session.sftp()?;
+    Ok(sftp)
+}
+
+fn pull_logs(map: &dashmap::DashMap<Box<Path>, u64>) -> Result<(), AppError> {
+    let sftp = create_sftp_session()?;
     let mut filesinfos: Vec<(Box<Path>, Box<Path>, u64)> = Vec::with_capacity(map.len());
 
     if let Err(e) = get_folder_info(&sftp, Path::new("."), Path::new("data"), &mut filesinfos) {
@@ -85,11 +88,11 @@ fn pull_logs(map: &dashmap::DashMap<Box<Path>, u64>) -> Result<(), AppError> {
             .show()
             .map_err(|n_err| AppError::Custom(n_err.to_string()))?;
     }
+    drop(sftp);
 
-    let msftp = Mutex::new(sftp);
     let copy_result = filesinfos
         .into_par_iter()
-        .map(move |i| copy_file(&msftp, i, &map))
+        .map(move |i|copy_file(i, &map))
         .collect::<Result<(), AppError>>();
 
     if let Err(e) = copy_result {
@@ -142,7 +145,6 @@ fn get_folder_info(
 }
 
 fn copy_file(
-    msftp: &Mutex<Sftp>,
     filesinfo: (Box<Path>, Box<Path>, u64),
     map: &dashmap::DashMap<Box<Path>, u64>,
 ) -> Result<(), AppError> {
@@ -160,6 +162,7 @@ fn copy_file(
     }
 
     if needs_copy {
+        let sftp = create_sftp_session()?;
         let remote_path_str = filesinfo
             .1
             .to_str()
@@ -173,9 +176,7 @@ fn copy_file(
             let mut file = std::fs::File::create(&filesinfo.0)?;
             map.insert(filesinfo.0, filesinfo.2);
 
-            let sftp = msftp.lock().map_err(|_| "SFTP Mutex Poisoned")?;
             let mut rfile = sftp.open(remote_path_str, libssh_rs::OpenFlags::READ_ONLY, 0)?;
-            drop(sftp);
             std::io::copy(&mut rfile, &mut file)?;
         } else {
             println!(
@@ -184,9 +185,7 @@ fn copy_file(
             );
             let mut file = std::fs::File::create(&filesinfo.0)?;
 
-            let sftp = msftp.lock().map_err(|_| "SFTP Mutex Poisoned")?;
             let mut rfile = sftp.open(remote_path_str, libssh_rs::OpenFlags::READ_ONLY, 0)?;
-            drop(sftp);
             std::io::copy(&mut rfile, &mut file)?;
         }
     } else {
