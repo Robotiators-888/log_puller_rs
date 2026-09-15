@@ -58,9 +58,11 @@ fn main() -> Result<(), AppError> {
     let mut sleeptime: Duration;
     loop {
         if let Err(e) = pull_logs(&map) {
+            println!("Failed to pull logs");
             eprintln!("{}", e);
             sleeptime = Duration::from_secs(3);
         } else {
+            println!("Successfully pulled logs");
             sleeptime = Duration::from_secs(60);
         }
         std::thread::sleep(sleeptime);
