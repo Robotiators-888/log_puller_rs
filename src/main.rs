@@ -84,7 +84,7 @@ fn pull_logs(map: &dashmap::DashMap<Box<Path>, u64>) -> Result<(), AppError> {
     let sftp = create_sftp_session()?;
     let mut filesinfos: Vec<(Box<Path>, Box<Path>, u64)> = Vec::with_capacity(map.len());
 
-    if let Err(e) = get_folder_info(&sftp, Path::new("/media/sda1/logs"), Path::new("data"), &mut filesinfos) {
+    if let Err(e) = get_folder_info(&sftp, Path::new(r"\media\sda1\logs"), Path::new("data"), &mut filesinfos) {
         notify_rust::Notification::new()
             .summary("Error getting folder info")
             .body(&format!("Error: {}", e))
@@ -118,7 +118,7 @@ fn get_folder_info(
     println!("Path: {}", dirpath.to_str().unwrap_or(""));
     println!("Prefix: {}", prefix.to_str().unwrap_or(""));
 
-    let path_str = dirpath.to_str().ok_or("Couldn't convert path to str")?.replace('\\', "/");
+    let path_str = dirpath.to_str().ok_or("Couldn't convert path to str")?;
 
     for f in sftp.read_dir(&path_str)?.into_iter() {
         let ftype = f.file_type().ok_or("Failed to get file type")?;
@@ -169,8 +169,7 @@ fn copy_file(
         let remote_path_str = filesinfo
             .1
             .to_str()
-            .ok_or("Failed to join remote file path")?
-            .replace('\\', "/");
+            .ok_or("Failed to join remote file path")?;
 
         if new_file {
             println!(
