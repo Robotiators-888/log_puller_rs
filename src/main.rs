@@ -89,7 +89,12 @@ fn main() -> Result<(), AppError> {
             println!("Successfully pulled logs");
             sleeptime = Duration::from_secs(60);
         }
-        std::thread::sleep(sleeptime);
+        for _ in 0..sleeptime.as_secs() {
+            if SHOULD_EXIT.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        }
     }
 
     Ok(())
