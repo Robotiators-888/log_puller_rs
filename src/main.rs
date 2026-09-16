@@ -2,11 +2,14 @@ use libssh_rs::{Session, Sftp};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::{collections::HashMap, path::Path, time::Duration};
 
+static SHOULD_EXIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[derive(Debug)]
 enum AppError {
     Io(std::io::Error),
     Ssh(libssh_rs::Error),
     Custom(String),
+    Exit
 }
 
 impl std::fmt::Display for AppError {
@@ -15,6 +18,7 @@ impl std::fmt::Display for AppError {
             AppError::Io(e) => write!(f, "IO Error: {}", e),
             AppError::Ssh(e) => write!(f, "SSH Error: {}", e),
             AppError::Custom(msg) => write!(f, "{}", msg),
+            AppError::Exit => write!(f, "Exit"),
         }
     }
 }
@@ -40,6 +44,10 @@ impl From<&str> for AppError {
 }
 
 fn main() -> Result<(), AppError> {
+    ctrlc::set_handler(move || {
+        SHOULD_EXIT.store(true, std::sync::atomic::Ordering::SeqCst);
+    }).map_err(|e| AppError::Custom(e.to_string()))?;
+
     let mut map: HashMap<Box<Path>, u64> = HashMap::new();
 
     if let Err(e) = populate_map(Path::new("data"), &mut map) {
@@ -58,7 +66,15 @@ fn main() -> Result<(), AppError> {
     let mut sleeptime: Duration;
     loop {
         if let Err(e) = pull_logs(&map) {
-            println!("Failed to pull logs");
+            if let AppError::Exit = e {
+                let _ = notify_rust::Notification::new()
+                    .summary("Exiting cleanly")
+                    .show()
+                    .map_err(|n_err| { eprintln!("{}", n_err.to_string()); AppError::Exit });
+                println!("Exiting cleanly");
+                break;
+            }
+            eprintln!("Failed to pull logs");
             eprintln!("{}", e);
             sleeptime = Duration::from_secs(3);
         } else {
@@ -68,7 +84,7 @@ fn main() -> Result<(), AppError> {
         std::thread::sleep(sleeptime);
     }
 
-    // Ok(())
+    Ok(())
 }
 
 fn create_sftp_session() -> Result<Sftp, AppError> {
@@ -77,12 +93,15 @@ fn create_sftp_session() -> Result<Sftp, AppError> {
     session.set_option(libssh_rs::SshOption::User(Some(String::from("admin"))))?;
     session.connect()?;
     session.userauth_password(None, Some(""))?;
-    
+
     let sftp = session.sftp()?;
     Ok(sftp)
 }
 
 fn pull_logs(map: &dashmap::DashMap<Box<Path>, u64>) -> Result<(), AppError> {
+    if SHOULD_EXIT.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(AppError::Exit);
+    }
     let sftp = create_sftp_session()?;
     let mut filesinfos: Vec<(Box<Path>, Box<Path>, u64)> = Vec::with_capacity(map.len());
 
@@ -101,11 +120,16 @@ fn pull_logs(map: &dashmap::DashMap<Box<Path>, u64>) -> Result<(), AppError> {
         .collect::<Result<(), AppError>>();
 
     if let Err(e) = copy_result {
-        notify_rust::Notification::new()
-            .summary("Error copying files")
-            .body(&format!("Error: {}", e))
-            .show()
-            .map_err(|n_err| AppError::Custom(n_err.to_string()))?;
+        if let AppError::Exit = e {
+            return Err(e);
+        }
+        else {
+            notify_rust::Notification::new()
+                .summary("Error copying files")
+                .body(&format!("Error: {}", e))
+                .show()
+                .map_err(|n_err| AppError::Custom(n_err.to_string()))?;
+        }
     }
 
     Ok(())
@@ -153,6 +177,9 @@ fn copy_file(
     filesinfo: (Box<Path>, Box<Path>, u64),
     map: &dashmap::DashMap<Box<Path>, u64>,
 ) -> Result<(), AppError> {
+    if SHOULD_EXIT.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(AppError::Exit);
+    }
     let mut needs_copy = false;
     let mut new_file = false;
 
