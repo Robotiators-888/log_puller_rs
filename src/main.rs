@@ -176,13 +176,13 @@ fn get_folder_info(
         let ftype = f.file_type().ok_or("Failed to get file type")?;
         match ftype {
             libssh_rs::FileType::Directory => {
-                let dirname = f.name().ok_or("Failed to get file name")?;
-                if dirname == "." || dirname == ".." {
-                    continue;
-                }
-                let prefixdir = &prefix.join(dirname);
-                std::fs::create_dir_all(prefixdir)?;
-                get_folder_info(sftp, &dirpath.join(dirname), prefixdir, filesinfos)?;
+                // let dirname = f.name().ok_or("Failed to get file name")?;
+                // if dirname == "." || dirname == ".." {
+                //     continue;
+                // }
+                // let prefixdir = &prefix.join(dirname);
+                // std::fs::create_dir_all(prefixdir)?;
+                // get_folder_info(sftp, &dirpath.join(dirname), prefixdir, filesinfos)?;
             }
             libssh_rs::FileType::Regular => {
                 let fname = f.name().ok_or("Failed to get file name")?;
