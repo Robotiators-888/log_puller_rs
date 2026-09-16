@@ -134,6 +134,7 @@ fn pull_logs(map: &dashmap::DashMap<Box<Path>, u64>) -> Result<(), AppError> {
                 .body(&format!("Error: {}", e))
                 .show()
                 .map_err(|n_err| AppError::Custom(n_err.to_string()))?;
+            return Err(e);
         }
     }
     drop(sftp);
