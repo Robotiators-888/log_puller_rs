@@ -67,10 +67,12 @@ fn main() -> Result<(), AppError> {
     loop {
         if let Err(e) = pull_logs(&map) {
             if let AppError::Exit = e {
-                let _ = notify_rust::Notification::new()
+                let err = notify_rust::Notification::new()
                     .summary("Exiting cleanly")
-                    .show()
-                    .map_err(|n_err| { eprintln!("{}", n_err.to_string()); AppError::Exit });
+                    .show();
+                if let Err(n) = err {
+                    eprintln!("{}", n);
+                }
                 println!("Exiting cleanly");
                 break;
             }
@@ -78,6 +80,12 @@ fn main() -> Result<(), AppError> {
             eprintln!("{}", e);
             sleeptime = Duration::from_secs(3);
         } else {
+            let err = notify_rust::Notification::new()
+                .summary("Successfully pulled logs")
+                .show();
+            if let Err(n) = err {
+                eprintln!("{}", n);
+            }
             println!("Successfully pulled logs");
             sleeptime = Duration::from_secs(60);
         }
