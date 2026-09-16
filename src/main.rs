@@ -45,7 +45,7 @@ impl From<&str> for AppError {
 
 fn main() -> Result<(), AppError> {
     ctrlc::set_handler(move || {
-        SHOULD_EXIT.store(true, std::sync::atomic::Ordering::SeqCst);
+        SHOULD_EXIT.store(true, std::sync::atomic::Ordering::Relaxed);
     }).map_err(|e| AppError::Custom(e.to_string()))?;
 
     let mut map: HashMap<Box<Path>, u64> = HashMap::new();
@@ -99,7 +99,7 @@ fn create_sftp_session() -> Result<Sftp, AppError> {
 }
 
 fn pull_logs(map: &dashmap::DashMap<Box<Path>, u64>) -> Result<(), AppError> {
-    if SHOULD_EXIT.load(std::sync::atomic::Ordering::SeqCst) {
+    if SHOULD_EXIT.load(std::sync::atomic::Ordering::Relaxed) {
         return Err(AppError::Exit);
     }
     let sftp = create_sftp_session()?;
@@ -186,7 +186,7 @@ fn copy_file(
     filesinfo: (Box<Path>, Box<Path>, u64),
     map: &dashmap::DashMap<Box<Path>, u64>,
 ) -> Result<(), AppError> {
-    if SHOULD_EXIT.load(std::sync::atomic::Ordering::SeqCst) {
+    if SHOULD_EXIT.load(std::sync::atomic::Ordering::Relaxed) {
         return Err(AppError::Exit);
     }
     let mut needs_copy = false;
