@@ -120,11 +120,16 @@ fn pull_logs(map: &dashmap::DashMap<Box<Path>, u64>) -> Result<(), AppError> {
         Path::new("data"),
         &mut filesinfos,
     ) {
-        notify_rust::Notification::new()
-            .summary("Error getting folder info")
-            .body(&format!("Error: {}", e))
-            .show()
-            .map_err(|n_err| AppError::Custom(n_err.to_string()))?;
+        if let AppError::Exit = e {
+            return Err(e);
+        }
+        else {
+            notify_rust::Notification::new()
+                .summary("Error getting folder info")
+                .body(&format!("Error: {}", e))
+                .show()
+                .map_err(|n_err| AppError::Custom(n_err.to_string()))?;
+        }
     }
     drop(sftp);
 
@@ -155,6 +160,9 @@ fn get_folder_info(
     prefix: &Path,
     filesinfos: &mut Vec<(Box<Path>, Box<Path>, u64)>,
 ) -> Result<(), AppError> {
+    if SHOULD_EXIT.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(AppError::Exit);
+    }
     println!("Path: {}", dirpath.to_str().unwrap_or(""));
     println!("Prefix: {}", prefix.to_str().unwrap_or(""));
 
