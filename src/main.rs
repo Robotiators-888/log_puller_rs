@@ -44,7 +44,7 @@ impl From<&str> for AppError {
 }
 
 fn main() -> Result<(), AppError> {
-    ctrlc::set_handler(move || {
+    ctrlc::set_handler(|| {
         SHOULD_EXIT.store(true, std::sync::atomic::Ordering::Relaxed);
     }).map_err(|e| AppError::Custom(e.to_string()))?;
 
